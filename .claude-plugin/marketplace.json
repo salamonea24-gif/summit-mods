@@ -1,0 +1,5 @@
+{
+  "name": "summit-mods",
+  "owner": { "name": "Anthony J. Salamone" },
+  "plugins": [{ "name": "summit", "source": "./", "description": "Summit workspace: approvals pane, delivery health, guardrail, live corrections, prepublish gate, notices, ship receipt." }]
+}
