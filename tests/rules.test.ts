@@ -4,7 +4,7 @@ import { classify } from '../hooks/guard'
 import { scan } from '../hooks/prepublish'
 import { dailyLine, slotLines, weeklyLine, sentinelLine, newProblems } from '../hooks/health'
 import { skillsFor, promptSection } from '../hooks/corrections'
-import { parseDocs, nextItemId } from '../hooks/board'
+import { parseDocs, nextItemId, rank } from '../hooks/board'
 
 const ROOT = 'C:\\Users\\Admin\\OneDrive\\Trading Scripts\\Stock Scanner'
 
@@ -120,4 +120,18 @@ test('board: reads ArtifactData output and numbers new lines', async () => {
   expect(docs.length).toBe(2)
   expect(docs[1]?.version).toBe(3)
   expect(nextItemId(docs as never)).toEqual({ id: 'i29', n: 29 })
+})
+
+test('board: ranking puts conflicts first and blocked lines last', async () => {
+  const mk = (id: string, n: number, group: string, extra: Record<string, unknown> = {}, status = 'waiting') =>
+    ({ id, version: 1, data: { n, title: id, group, ask: '', why: '', where: '', status, needsReply: false, updatedAt: n, ...extra } }) as never
+  const order = ['Decide first', 'Launch blockers', 'Housekeeping']
+  const items = [
+    mk('i01', 1, 'Launch blockers'),
+    mk('i02', 2, 'Decide first', {}, 'approved'),
+    mk('i03', 3, 'Decide first', { dependsOn: ['i02'] }),
+    mk('i04', 4, 'Housekeeping', { conflict: { item: 'i02', note: 'x' } }),
+    mk('i05', 5, 'Decide first', { dependsOn: ['i01'] }),
+  ]
+  expect(rank(items, order).map((d: { id: string }) => d.id)).toEqual(['i04', 'i03', 'i02', 'i01', 'i05'])
 })

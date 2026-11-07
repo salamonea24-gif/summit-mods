@@ -14,6 +14,9 @@ export type BoardItem = {
   needsReply: boolean
   updatedAt: number
   gateKey?: string
+  dependsOn?: string[]
+  settledBy?: { item: string; at: number; note: string }
+  conflict?: { item: string; note: string } | null
 }
 
 export type BoardMsg = {

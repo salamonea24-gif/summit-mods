@@ -516,6 +516,7 @@ export const register: Register = on => {
     }
     const count = (k: typeof which) => data.rows.filter(r => groups[k](r.item)).length
     const shown = data.rows.filter(r => groups[which](r.item))
+    const byId = new Map(data.rows.map(r => [r.id, r.item]))
     const hl = await read($, health)
 
     const act = async (row: PaneRow, decision: 'approved' | 'declined' | 'held' | null, text: string) => {
@@ -525,7 +526,7 @@ export const register: Register = on => {
         $.ui.toast(decision ? `${label(decision)}: ${row.item.title}` : `Sent: ${row.item.title}`)
         await refreshBoard($)
         const what = decision ? `chose "${label(decision)}"` : `wrote "${text}"`
-        quiet($.prompt.submit({ text: `On the Waiting on you board I ${what} on "${row.item.title}". Act on it and answer on that line (board ${BOARD_URL}).` } as never))
+        quiet($.prompt.submit({ text: `On the Waiting on you board I ${what} on "${row.item.title}" (item ${row.id}). Act on it and answer on that line (board ${BOARD_URL}). Then reconcile: read every other open item and, where my answer settles or contradicts one, set settledBy or conflict on it with a claude msg saying why, following the reconcile rule in /mnt/project-files/ops/waiting-on-anthony-schema.md (never auto-approve a line that needs my explicit yes).` } as never))
       } catch (err) {
         $.ui.toast(`Could not save that: ${String((err as Error)?.message ?? err).slice(0, 100)}. Refresh and try again.`)
         await refreshBoard($)
@@ -555,6 +556,11 @@ export const register: Register = on => {
             <Text dimColor size="footnote">{row.item.group} · {row.item.where}</Text>
             <Text>{row.item.ask}</Text>
             <Text dimColor>{row.item.why}</Text>
+            {row.item.conflict && <Text color="error">Needs a second look: {row.item.conflict.note} (line {byId.get(row.item.conflict.item)?.n ?? '?'})</Text>}
+            {row.item.settledBy && <Text color="success">Seems settled by your answer on line {byId.get(row.item.settledBy.item)?.n ?? '?'}: {row.item.settledBy.note}</Text>}
+            {board.openParents(row.item, byId).length > 0 && (
+              <Text color="warning">Waiting on line {board.openParents(row.item, byId).map(id => byId.get(id)?.n ?? '?').join(', ')} first</Text>
+            )}
             {row.item.rec && <Text color="suggestion">Recommended: {row.item.rec}</Text>}
             {row.msgs.slice(-4).map(m => (
               <Text size="footnote" dimColor={m.from === 'claude'}>

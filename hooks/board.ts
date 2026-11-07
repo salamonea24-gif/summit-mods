@@ -101,13 +101,36 @@ export async function addCorrection(call: Call, c: Correction, now: number) {
   return id
 }
 
-// Board items still needing Anthony, best first.
+export function isAnswered(i: BoardItem | undefined): boolean {
+  return !!i && i.status !== 'waiting' && i.status !== 'claude' && i.status !== 'held'
+}
+
+// What a line is waiting on, among its dependsOn parents.
+export function openParents(item: BoardItem, byId: Map<string, BoardItem>): string[] {
+  return (item.dependsOn ?? []).filter(id => !isAnswered(byId.get(id)))
+}
+
+// Ranking shared with the board (schema file, 7 Nov): conflicts first, then lines whose
+// parents were all answered (most recently unblocked first), then group order by number;
+// lines with an open parent sink to the bottom.
 export function rank(items: Doc<BoardItem>[], order: string[]): Doc<BoardItem>[] {
+  const byId = new Map(items.map(d => [d.id, d.data]))
   const g = (s: string) => {
     const i = order.indexOf(s)
     return i < 0 ? order.length : i
   }
-  return [...items].sort((a, b) => g(a.data.group) - g(b.data.group) || a.data.n - b.data.n)
+  const unblockedAt = (i: BoardItem) =>
+    (i.dependsOn ?? []).length && openParents(i, byId).length === 0
+      ? Math.max(...(i.dependsOn ?? []).map(id => byId.get(id)?.updatedAt ?? 0))
+      : 0
+  const tier = (i: BoardItem) => (i.conflict ? 0 : openParents(i, byId).length ? 3 : unblockedAt(i) ? 1 : 2)
+  return [...items].sort(
+    (a, b) =>
+      tier(a.data) - tier(b.data) ||
+      unblockedAt(b.data) - unblockedAt(a.data) ||
+      g(a.data.group) - g(b.data.group) ||
+      a.data.n - b.data.n,
+  )
 }
 
 export function isWaiting(i: BoardItem) {
