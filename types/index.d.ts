@@ -17,6 +17,7 @@ export type BoardItem = {
   dependsOn?: string[]
   settledBy?: { item: string; at: number; note: string }
   conflict?: { item: string; note: string } | null
+  owner?: string
 }
 
 export type BoardMsg = {

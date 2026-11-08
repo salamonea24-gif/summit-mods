@@ -4,7 +4,7 @@ import { classify } from '../hooks/guard'
 import { scan } from '../hooks/prepublish'
 import { dailyLine, slotLines, weeklyLine, sentinelLine, newProblems } from '../hooks/health'
 import { skillsFor, promptSection } from '../hooks/corrections'
-import { parseDocs, nextItemId, rank } from '../hooks/board'
+import { parseDocs, nextItemId, rank, staleReplies, hoursSince } from '../hooks/board'
 
 const ROOT = 'C:\\Users\\Admin\\OneDrive\\Trading Scripts\\Stock Scanner'
 
@@ -134,4 +134,13 @@ test('board: ranking puts conflicts first and blocked lines last', async () => {
     mk('i05', 5, 'Decide first', { dependsOn: ['i01'] }),
   ]
   expect(rank(items, order).map((d: { id: string }) => d.id)).toEqual(['i04', 'i03', 'i02', 'i01', 'i05'])
+})
+
+test('board: a reply owed for over two hours is stale', async () => {
+  const now = Date.UTC(2026, 10, 8, 11)
+  const mk = (id: string, needsReply: boolean, agoH: number) =>
+    ({ id, version: 1, data: { n: 1, title: id, group: 'x', ask: '', why: '', where: '', status: 'claude', needsReply, updatedAt: now - agoH * 3600000 } }) as never
+  const items = [mk('fresh', true, 1), mk('old', true, 10), mk('answered', false, 20)]
+  expect(staleReplies(items, now).map((d: { id: string }) => d.id)).toEqual(['old'])
+  expect(hoursSince(now - 10 * 3600000, now)).toBe('10 h')
 })

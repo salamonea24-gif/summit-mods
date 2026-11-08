@@ -249,6 +249,26 @@ async function twiceDaily($: Dollar) {
   $.ui.toast(`${waiting.length} waiting on you. ${text}`, { timeoutMs: 20000 })
 }
 
+// A line Claude has owed an answer on for over two hours gets one alert a day.
+async function staleCheck($: Dollar) {
+  const now = await $.clock.now()
+  const rows = (await read($, pane)).rows
+  const docs: Doc<BoardItem>[] = rows.map(r => ({ id: r.id, version: r.version, data: r.item }))
+  const stale = board.staleReplies(docs, now)
+  if (stale.length === 0) return
+  const day = etParts(now).date
+  for (const d of stale) {
+    const key = `stale:${day}:${d.id}`
+    if (await $.store.get(key)) continue
+    await $.store.set(key, true)
+    const who = d.data.owner ? ` (owner: ${d.data.owner})` : ' (no owner set)'
+    const text = `Line ${d.data.n} "${d.data.title}" has had no answer from Claude for ${board.hoursSince(d.data.updatedAt, now)}${who}.`
+    $.ui.toast(`Summit · ${text}`, { timeoutMs: 20000 })
+    quiet($.ui.notify(text, { title: 'Summit · an answer is overdue' }))
+  }
+  $.ui.toast(`${stale.length} line${stale.length === 1 ? '' : 's'} waiting on Claude for over two hours. Type /waiting to see them.`, { timeoutMs: 12000 })
+}
+
 async function logGuard($: Dollar, ev: GuardEvent) {
   await update($, guardLog, list => [...list, ev].slice(-50))
 }
@@ -273,6 +293,7 @@ export const register: Register = on => {
     $.clock.every(3 * 60 * 1000, () => quiet(refreshBoard($)))
     $.clock.every(5 * 60 * 1000, () => quiet(refreshHealth($, true)))
     $.clock.every(60 * 1000, () => quiet(twiceDaily($)))
+    $.clock.every(15 * 60 * 1000, () => quiet(staleCheck($)))
     return ran
   })
 
@@ -526,7 +547,7 @@ export const register: Register = on => {
         $.ui.toast(decision ? `${label(decision)}: ${row.item.title}` : `Sent: ${row.item.title}`)
         await refreshBoard($)
         const what = decision ? `chose "${label(decision)}"` : `wrote "${text}"`
-        quiet($.prompt.submit({ text: `On the Waiting on you board I ${what} on "${row.item.title}" (item ${row.id}). Act on it and answer on that line (board ${BOARD_URL}). Then reconcile: read every other open item and, where my answer settles or contradicts one, set settledBy or conflict on it with a claude msg saying why, following the reconcile rule in /mnt/project-files/ops/waiting-on-anthony-schema.md (never auto-approve a line that needs my explicit yes).` } as never))
+        quiet($.prompt.submit({ text: `On the Waiting on you board I ${what} on "${row.item.title}" (item ${row.id}). ${row.item.owner ? `This line is owned by the thread "${row.item.owner}", which answers it; do not answer it yourself, only make sure that thread is woken (board ${BOARD_URL}).` : `No thread owns this line, so act on it yourself and answer on that line (board ${BOARD_URL}).`} Then reconcile: read every other open item and, where my answer settles or contradicts one, set settledBy or conflict on it with a claude msg saying why, following the reconcile rule in /mnt/project-files/ops/waiting-on-anthony-schema.md (never auto-approve a line that needs my explicit yes).` } as never))
       } catch (err) {
         $.ui.toast(`Could not save that: ${String((err as Error)?.message ?? err).slice(0, 100)}. Refresh and try again.`)
         await refreshBoard($)
@@ -567,7 +588,11 @@ export const register: Register = on => {
                 {m.from === 'anthony' ? 'You' : 'Claude'}: {m.decision ? `[${label(m.decision)}] ` : ''}{m.text}
               </Text>
             ))}
-            {row.item.status === 'claude' && <Text color="claude" size="footnote">Claude is answering.</Text>}
+            {row.item.status === 'claude' && (
+              <Text color={Date.now() - row.item.updatedAt > 2 * 3600000 ? 'error' : 'claude'} size="footnote">
+                {Date.now() - row.item.updatedAt > 2 * 3600000 ? `No answer for ${board.hoursSince(row.item.updatedAt, Date.now())}` : 'Claude is answering'}{row.item.owner ? ` · owner: ${row.item.owner}` : ''}
+              </Text>
+            )}
             {(row.item.status === 'waiting' || row.item.status === 'held') && (
               <Box flexDirection="row" flexWrap="wrap" gap={1}>
                 <Button key={`ok-${row.id}`} variant="primary" onPress={() => quiet(act(row, 'approved', 'Approved'))}>Approve</Button>

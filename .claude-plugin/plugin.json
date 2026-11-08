@@ -1,6 +1,6 @@
 {
   "name": "summit",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Summit workspace: approvals pane, delivery health line, guardrail, live corrections, prepublish gate, twice-daily alert and scanner ship receipt.",
   "types": "./types/index.d.ts"
 }

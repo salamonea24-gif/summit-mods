@@ -133,6 +133,17 @@ export function rank(items: Doc<BoardItem>[], order: string[]): Doc<BoardItem>[]
   )
 }
 
+// Lines Claude owes an answer on for longer than `hours`.
+export function staleReplies(items: Doc<BoardItem>[], now: number, hours = 2): Doc<BoardItem>[] {
+  const limit = hours * 3600 * 1000
+  return items.filter(d => d.data.needsReply && now - d.data.updatedAt > limit)
+}
+
+export function hoursSince(ms: number, now: number): string {
+  const h = (now - ms) / 3600000
+  return h < 1 ? `${Math.round(h * 60)} min` : `${Math.round(h * 10) / 10} h`
+}
+
 export function isWaiting(i: BoardItem) {
   return i.status === 'waiting'
 }
