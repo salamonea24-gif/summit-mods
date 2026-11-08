@@ -146,7 +146,38 @@ function quiet(p: Promise<unknown>): void {
   p.catch(() => undefined)
 }
 
-const mem = { boardItems: [] as Doc<BoardItem>[], lastDenied: null as { key: string; title: string } | null }
+const mem = { boardItems: [] as Doc<BoardItem>[], lastDenied: null as { key: string; title: string } | null, seenMsgAt: 0 }
+const SCHEMA_PATH = '/mnt/project-files/ops/waiting-on-anthony-schema.md'
+
+function unlocksOf(id: string, rows: PaneRow[]): number {
+  return board.unlockCount(id, rows.map(r => ({ id: r.id, version: r.version, data: r.item })))
+}
+
+// An answer Anthony gave on the board web page (not in the pane) gets the same follow-up here:
+// a toast, and the Code session is asked to act and reconcile when no thread owns the line.
+async function boardPageAnswers($: Dollar, items: Doc<BoardItem>[], msgs: Doc<BoardMsg>[]) {
+  const stored = (await $.store.get('seenMsgAt')) as number | undefined
+  const latest = msgs.reduce((m, d) => Math.max(m, d.data.at), 0)
+  if (stored === undefined) {
+    // First run: start from now, never replay history.
+    mem.seenMsgAt = latest
+    await $.store.set('seenMsgAt', latest)
+    return
+  }
+  const since = Math.max(stored, mem.seenMsgAt)
+  const fresh = msgs.filter(d => d.data.from === 'anthony' && d.data.at > since).sort((a, b) => a.data.at - b.data.at)
+  if (!fresh.length) return
+  mem.seenMsgAt = latest
+  await $.store.set('seenMsgAt', latest)
+  const byId = new Map(items.map(d => [d.id, d]))
+  for (const m of fresh) {
+    const item = byId.get(m.data.item)
+    if (!item) continue
+    $.ui.toast(`Anthony answered line ${item.data.n} on the board: ${m.data.text.slice(0, 60)}`)
+    const what = m.data.decision ? `chose "${label(m.data.decision)}"` : `wrote "${m.data.text}"`
+    quiet($.prompt.submit({ text: board.afterAnswerPrompt(item.id, item.data, what, BOARD_URL, SCHEMA_PATH) } as never))
+  }
+}
 
 async function refreshBoard($: Dollar) {
   if (!(await hasTool($, 'ArtifactData'))) {
@@ -157,6 +188,7 @@ async function refreshBoard($: Dollar) {
     const call = boardCall($)
     const [items, msgs] = await Promise.all([board.readItems(call), board.readMsgs(call)])
     mem.boardItems = items
+    await boardPageAnswers($, items, msgs)
     const byItem = new Map<string, BoardMsg[]>()
     for (const m of msgs) {
       const list = byItem.get(m.data.item) ?? []
@@ -547,7 +579,8 @@ export const register: Register = on => {
         $.ui.toast(decision ? `${label(decision)}: ${row.item.title}` : `Sent: ${row.item.title}`)
         await refreshBoard($)
         const what = decision ? `chose "${label(decision)}"` : `wrote "${text}"`
-        quiet($.prompt.submit({ text: `On the Waiting on you board I ${what} on "${row.item.title}" (item ${row.id}). ${row.item.owner ? `This line is owned by the thread "${row.item.owner}", which answers it; do not answer it yourself, only make sure that thread is woken (board ${BOARD_URL}).` : `No thread owns this line, so act on it yourself and answer on that line (board ${BOARD_URL}).`} Then reconcile: read every other open item and, where my answer settles or contradicts one, set settledBy or conflict on it with a claude msg saying why, following the reconcile rule in /mnt/project-files/ops/waiting-on-anthony-schema.md (never auto-approve a line that needs my explicit yes).` } as never))
+        mem.seenMsgAt = Math.max(mem.seenMsgAt, Date.now())
+        quiet($.prompt.submit({ text: board.afterAnswerPrompt(row.id, row.item, what, BOARD_URL, SCHEMA_PATH) } as never))
       } catch (err) {
         $.ui.toast(`Could not save that: ${String((err as Error)?.message ?? err).slice(0, 100)}. Refresh and try again.`)
         await refreshBoard($)
@@ -581,6 +614,9 @@ export const register: Register = on => {
             {row.item.settledBy && <Text color="success">Seems settled by your answer on line {byId.get(row.item.settledBy.item)?.n ?? '?'}: {row.item.settledBy.note}</Text>}
             {board.openParents(row.item, byId).length > 0 && (
               <Text color="warning">Waiting on line {board.openParents(row.item, byId).map(id => byId.get(id)?.n ?? '?').join(', ')} first</Text>
+            )}
+            {row.item.status === 'waiting' && unlocksOf(row.id, data.rows) > 0 && (
+              <Text color="success" size="footnote">Unlocks {unlocksOf(row.id, data.rows)} other {unlocksOf(row.id, data.rows) === 1 ? 'line' : 'lines'}</Text>
             )}
             {row.item.rec && <Text color="suggestion">Recommended: {row.item.rec}</Text>}
             {row.msgs.slice(-4).map(m => (

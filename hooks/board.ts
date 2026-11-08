@@ -110,9 +110,15 @@ export function openParents(item: BoardItem, byId: Map<string, BoardItem>): stri
   return (item.dependsOn ?? []).filter(id => !isAnswered(byId.get(id)))
 }
 
-// Ranking shared with the board (schema file, 7 Nov): conflicts first, then lines whose
-// parents were all answered (most recently unblocked first), then group order by number;
-// lines with an open parent sink to the bottom.
+// Open lines that wait on this one: answering it moves them.
+export function unlockCount(id: string, items: Doc<BoardItem>[]): number {
+  return items.filter(d => !isAnswered(d.data) && (d.data.dependsOn ?? []).includes(id)).length
+}
+
+// Ranking shared with the board page (schema file, 7 and 8 Nov): conflicts first, then lines
+// whose parents were all answered (most recently unblocked first), then group order; inside a
+// group the line that unlocks the most other open lines comes first, then the oldest (lowest
+// number). Lines with an open parent sink to the bottom.
 export function rank(items: Doc<BoardItem>[], order: string[]): Doc<BoardItem>[] {
   const byId = new Map(items.map(d => [d.id, d.data]))
   const g = (s: string) => {
@@ -124,13 +130,23 @@ export function rank(items: Doc<BoardItem>[], order: string[]): Doc<BoardItem>[]
       ? Math.max(...(i.dependsOn ?? []).map(id => byId.get(id)?.updatedAt ?? 0))
       : 0
   const tier = (i: BoardItem) => (i.conflict ? 0 : openParents(i, byId).length ? 3 : unblockedAt(i) ? 1 : 2)
+  const unlocks = new Map(items.map(d => [d.id, unlockCount(d.id, items)]))
   return [...items].sort(
     (a, b) =>
       tier(a.data) - tier(b.data) ||
       unblockedAt(b.data) - unblockedAt(a.data) ||
       g(a.data.group) - g(b.data.group) ||
+      (unlocks.get(b.id) ?? 0) - (unlocks.get(a.id) ?? 0) ||
       a.data.n - b.data.n,
   )
+}
+
+// The prompt the Code session gets after Anthony answers a line, from the pane or the board page.
+export function afterAnswerPrompt(id: string, item: BoardItem, what: string, boardUrl: string, schemaPath: string): string {
+  const who = item.owner
+    ? `This line is owned by the thread "${item.owner}", which answers it; do not answer it yourself, only make sure that thread is woken (board ${boardUrl}).`
+    : `No thread owns this line, so act on it yourself and answer on that line (board ${boardUrl}).`
+  return `On the Waiting on you board Anthony ${what} on "${item.title}" (item ${id}). ${who} Then reconcile: read every other open item and, where his answer settles or contradicts one, set settledBy or conflict on it with a claude msg saying why, following the reconcile rule in ${schemaPath} (never auto-approve a line that needs his explicit yes).`
 }
 
 // Lines Claude owes an answer on for longer than `hours`.

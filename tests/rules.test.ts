@@ -4,7 +4,7 @@ import { classify } from '../hooks/guard'
 import { scan } from '../hooks/prepublish'
 import { dailyLine, slotLines, weeklyLine, sentinelLine, newProblems } from '../hooks/health'
 import { skillsFor, promptSection } from '../hooks/corrections'
-import { parseDocs, nextItemId, rank, staleReplies, hoursSince } from '../hooks/board'
+import { parseDocs, nextItemId, rank, staleReplies, hoursSince, unlockCount, afterAnswerPrompt } from '../hooks/board'
 
 const ROOT = 'C:\\Users\\Admin\\OneDrive\\Trading Scripts\\Stock Scanner'
 
@@ -134,6 +134,26 @@ test('board: ranking puts conflicts first and blocked lines last', async () => {
     mk('i05', 5, 'Decide first', { dependsOn: ['i01'] }),
   ]
   expect(rank(items, order).map((d: { id: string }) => d.id)).toEqual(['i04', 'i03', 'i02', 'i01', 'i05'])
+})
+
+test('board: inside a group, the line that unlocks the most comes first, then the oldest', async () => {
+  const mk = (id: string, n: number, extra: Record<string, unknown> = {}, status = 'waiting') =>
+    ({ id, version: 1, data: { n, title: id, group: 'Launch blockers', ask: '', why: '', where: '', status, needsReply: false, updatedAt: n, ...extra } }) as never
+  const items = [
+    mk('i11', 11, { dependsOn: ['i16'] }),
+    mk('i14', 14, { dependsOn: ['i16'] }),
+    mk('i15', 15),
+    mk('i16', 16),
+    mk('i25', 25, { dependsOn: ['i21'] }, 'live'),
+    mk('i21', 21),
+  ]
+  expect(unlockCount('i16', items)).toBe(2)
+  // i25 is answered, so i21 unlocks nothing now.
+  expect(unlockCount('i21', items)).toBe(0)
+  expect(rank(items, ['Launch blockers']).map((d: { id: string }) => d.id)).toEqual(['i16', 'i15', 'i21', 'i11', 'i14', 'i25'])
+  const p = afterAnswerPrompt('i16', (items[3] as unknown as { data: never }).data, 'chose "Approved"', 'URL', 'SCHEMA')
+  expect(p.includes('No thread owns this line')).toBe(true)
+  expect(afterAnswerPrompt('i16', { ...(items[3] as unknown as { data: object }).data, owner: 'Ensure every publication is delivered' } as never, 'x', 'U', 'S').includes('owned by the thread "Ensure every publication is delivered"')).toBe(true)
 })
 
 test('board: a reply owed for over two hours is stale', async () => {
